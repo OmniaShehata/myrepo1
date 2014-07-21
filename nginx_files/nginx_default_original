@@ -24,7 +24,7 @@ server {
         index index.php index.html index.htm;
 
         # Make site accessible from http://localhost/
-        server_name www.mysite.com;
+        server_name {{ server_hostname }};
 
         location / {
                 # First attempt to serve request as file, then
