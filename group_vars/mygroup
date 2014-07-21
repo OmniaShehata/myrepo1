@@ -1,0 +1,25 @@
+---
+group_name_or_host_name: your host or group name as specified in /etc/ansible/hosts
+user_to_login_ssh: user on the server
+
+ansible_ssh_user: user on the server
+
+#version of wordpress to deploy
+wp_version: 3.7
+wp_sha256sum: 94b8b7a7241ec0817defa1c35f738d777f01ac17a4e45ee325c0f1778504fd94
+
+#wordpress database settings
+wp_db_name: wordpress
+
+wp_db_user: wordpress
+wp_db_password: wordpress
+
+mysql_port: 3306
+
+mysql_root_password: your root password
+
+server_hostname: your server hostname
+
+auto_up_disable: false
+
+core_update_level: true
