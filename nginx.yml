@@ -1,0 +1,140 @@
+---
+- hosts: {{ group_name_or_host_name }}
+  user: {{ user_to_login_ssh }}
+  sudo: true
+  tasks:
+    - name: Installing nginx web server
+      apt: pkg=nginx state=installed update_cache=true
+      notify:
+        - start nginx
+    
+    - name: Update apt repo
+      action: command /usr/bin/apt-get update
+
+    - name: Upload a default file for nginx
+      copy: src=nginx_files/index.html dest=/usr/share/nginx/html/ mode=0644
+
+    - name: MySQL | Set debconf vars
+      action: raw sudo echo mysql-server mysql-server/root_password password $mysql_root_password | sudo /usr/bin/debconf-set-selections
+      tags: mysql
+
+    - name: MySQL | Set debconf vars
+      action: raw sudo echo mysql-server mysql-server/root_password_again password $mysql_root_password | sudo /usr/bin/debconf-set-selections
+      tags: mysql
+
+    - name: Installing MySQL server
+      apt: pkg=mysql-server state=installed update_cache=true
+
+    - name: Installing MySQL Client
+      apt: pkg=mysql-client state=installed update_cache=true
+
+    - name: Installing MySQL
+      apt: pkg=mysql-common state=installed update_cache=true
+
+    - name: Restarting MySQL
+      service: name=mysql state=started
+
+    - name: Telling mysql to generate the structure directoriesfor the database's data
+      action: command /usr/bin/mysql_install_db
+
+    - name: Installing PHP5-FPM
+      apt: pkg=php5-fpm state=installed update_cache=true
+      notify: 
+        - restart php5-fpm
+
+    - name: Connecting php with the backend database
+      apt: pkg=php5-mysql state=installed update_cache=true
+      notify:
+        - restart php5-fpm
+
+    - name: Not allowing any unknown users from executing scripts on the server
+      lineinfile: dest=/etc/php5/fpm/php.ini 
+                  regexp='^;cgi.fix_pathinfo=1'
+                  line='cgi.fix_pathinfo=0' 
+                  backrefs=yes
+                  state=present 
+      notify:
+        - restart php5-fpm
+
+    - name: Modify listen directive to listen to tcp instead of socket
+      lineinfile: dest=/etc/php5/fpm/pool.d/www.conf
+                  regexp='^listen = /var/run/php5-fpm.sock'
+                  line='listen = 127.0.0.1:9000'
+                  backrefs=yes
+                  state=present
+      notify:
+        - restart php5-fpm
+
+    - name: Modify the default site of nginx to be able to use php-fpm
+      copy: src=nginx_files/nginx_default_original dest=/etc/nginx/sites-available/default mode=0644
+      notify:
+        - restart nginx 
+
+    - name: Testing the php content with php-fpm enabled
+      copy: src=nginx_files/index.php dest=/usr/share/nginx/html/ mode=0644
+      notify:
+        - restart php5-fpm 
+
+    - name: Installing python MySQL package for mysql_db tasks to work
+      apt: name=python-mysqldb state=present
+
+    - name: Modify the password of mysql root user
+      mysql_user: user=root password={{ mysql_root_password }} state=present login_user='root' login_password={{ mysql_root_password }}
+
+    - name: Creating a directory for wordpress
+      file: path=/var/www state=directory
+
+    - name: Adjusting Permissions
+      action: command /bin/chown -R www-data:www-data /var/www/
+
+    - name: Downloading Wordpress
+      get_url: url=http://wordpress.org/wordpress-{{ wp_version }}.tar.gz dest=/usr/share/nginx/html/wordpress-{{ wp_version }}.tar.gz sha256sum={{ wp_sha256sum }}
+      
+    - name: Extract Archive
+      command: chdir=/usr/share/nginx/html /bin/tar xvf wordpress-{{ wp_version }}.tar.gz creates=/usr/share/nginx/html/wordpress
+
+    - name: Add group "wordpress"
+      group: name=wordpress
+
+    - name: Add user "wordpress"
+      user: name=wordpress group=wordpress home=/var/www/wordpress/
+
+    - name: Fetch random salts for wordpress config
+      local_action: command /usr/bin/curl https://api.wordpress.org/secret-key/1.1/salt/
+      register: "wp_salt"
+      sudo: no
+
+    - name: Create Wordpress database
+      mysql_db: name={{ wp_db_name }} state=present collation=utf8_general_ci login_user='root' login_password={{ mysql_root_password }}
+
+    - name: Create a database user
+      mysql_user: name={{ wp_db_user }} password={{ wp_db_password }} priv={{ wp_db_name }}.*:ALL host='localhost' state=present login_user='root' login_password={{ mysql_root_password }}
+
+    - name: Copy Wordpress config file 
+      template: src=nginx_files/wp-config.php dest=/usr/share/nginx/html/wordpress/
+
+    - name: Change Ownership of wordpress installation
+      file: path=/usr/share/nginx/html/wordpress/ owner=wordpress group=wordpress state=directory 
+
+    - name: make file for wordpress in the available sites
+      action: command /usr/bin/touch /etc/nginx/sites-available/wordpress 
+
+    - name: Configure the wordpress site
+      copy: src=nginx_files/nginx_default dest=/etc/nginx/sites-available/wordpress
+
+    - name: Enable the wordpress site
+      file: src=/etc/nginx/sites-available/default dest=/etc/nginx/sites-enabled/default owner=root group=root state=link  
+      notify: 
+        - restart nginx
+        - restart php5-fpm
+
+
+  handlers:
+    - name: start nginx
+      service: name=nginx state=started 
+
+    - name: restart php5-fpm
+      service: name=php5-fpm state=restarted
+
+    - name: restart nginx
+      service: name=nginx state=restarted
